@@ -1,0 +1,36 @@
+# Create a new customer record in ExportMaster
+# Inputs: name, account_type, postcode
+# Outputs: customer_number (assigned by ExportMaster)
+
+task "Create New Customer"
+  input name, account_type, postcode
+
+  step "Open customer screen"
+    expect "main menu is visible"
+    click "Customers menu item"
+    expect "customer list screen is loaded"
+
+  step "Start new record"
+    expect "toolbar is visible and New button is enabled"
+    click "New Customer button"
+    expect "blank customer entry form is open"
+
+  step "Enter details"
+    type name into "customer name field"
+    select account_type in "account type dropdown"
+    type postcode into "postcode field"
+    key Tab
+    expect "address fields have been populated by postcode lookup"
+
+  step "Save"
+    click "Save button"
+    expect "record saved successfully and customer number is visible"
+    extract customer_number from "customer number field"
+    output customer_number
+
+  on timeout
+    abort "Timed out waiting for screen state"
+
+  on error
+    screenshot
+    abort "Unexpected screen state encountered"

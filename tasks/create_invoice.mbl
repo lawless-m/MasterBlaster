@@ -1,0 +1,48 @@
+# Create an invoice in ExportMaster for a given order and template
+# Called by: invoice processing service
+# Inputs: order_number (e.g. "Z6446"), invoice_template (e.g. "EUROLAND4")
+# Outputs: invoice_number (the generated invoice number)
+
+task "Create Invoice"
+  input order_number, invoice_template
+
+  step "Navigate to invoicing"
+    expect "main menu or desktop is visible"
+    click "Invoicing menu item"
+    expect "invoicing screen is loaded"
+
+  step "Select template"
+    click "template selector"
+    select invoice_template in "template dropdown"
+    expect "template is selected and form is ready"
+
+  step "Enter order reference"
+    type order_number into "order reference field"
+    key Enter
+    expect "order details have been loaded and line items are visible"
+
+  step "Handle possible credit hold warning"
+    if screen shows "credit hold warning dialog"
+      click "Override button"
+      expect "warning dismissed and invoice form is visible"
+    end
+
+  step "Generate invoice"
+    click "Create Invoice button"
+    expect "invoice has been generated successfully"
+
+  step "Capture invoice number"
+    extract invoice_number from "invoice number field"
+    output invoice_number
+
+  step "Return to menu"
+    key Escape
+    expect "invoicing screen or main menu is visible"
+
+  on timeout
+    screenshot
+    abort "Timed out waiting for ExportMaster to respond"
+
+  on error
+    screenshot
+    abort "Unexpected screen state in ExportMaster"

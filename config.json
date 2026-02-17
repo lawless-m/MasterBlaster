@@ -1,0 +1,42 @@
+{
+  "tcp": {
+    "host": "127.0.0.1",
+    "port": 9500
+  },
+
+  "rdp": {
+    "server": "exportmaster-vm",
+    "port": 3389,
+    "username": "automation_user",
+    "password_env": "MB_RDP_PASSWORD",
+    "domain": "CORP",
+    "width": 1920,
+    "height": 1080,
+    "color_depth": 32
+  },
+
+  "claude": {
+    "api_key_env": "ANTHROPIC_API_KEY",
+    "model": "claude-sonnet-4-5-20250929",
+    "max_tokens_per_request": 1024,
+    "token_budget_per_task": 100000,
+    "retry_on_rate_limit": true,
+    "rate_limit_backoff_ms": 5000
+  },
+
+  "tasks": {
+    "directory": "./tasks",
+    "default_expect_timeout_seconds": 10,
+    "expect_retry_intervals_ms": [1000, 2000, 4000],
+    "post_action_delay_ms": 500,
+    "post_click_delay_ms": 500,
+    "typing_delay_ms": 50
+  },
+
+  "logging": {
+    "directory": "./logs",
+    "screenshot_directory": "./screenshots",
+    "retention_days": 30,
+    "log_level": "info"
+  }
+}
