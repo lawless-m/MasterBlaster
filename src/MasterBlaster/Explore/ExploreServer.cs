@@ -4,6 +4,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using MasterBlaster.Claude;
 using MasterBlaster.Rdp;
 using Microsoft.Extensions.Logging;
@@ -186,9 +187,126 @@ public class ExploreServer : IAsyncDisposable
     {
         var body = await ReadBodyAsync<ChatRequest>(req);
         var screenshot = await _rdp.CaptureScreenshotAsync();
-        var result = await _claude.SendAsync(screenshot, body.Prompt);
-        RecordAction("chat", body.Prompt);
-        await WriteJsonAsync(resp, new { response = result.Text, model = result.Model, inputTokens = result.InputTokens, outputTokens = result.OutputTokens });
+
+        var planPrompt = $"""
+            The user says: {body.Prompt}
+
+            You are an interactive agent controlling a Windows application via RDP.
+            Look at the screenshot and perform the requested actions.
+
+            Respond with a DESCRIPTION line, then one or more numbered action lines.
+            Each action line has ACTION, TARGET, and VALUE on the same line separated by two spaces.
+
+            Format:
+            DESCRIPTION: what you see and what you'll do
+            1. ACTION: click  TARGET: element name  VALUE: x,y
+            2. ACTION: type  TARGET: field name  VALUE: text to type
+
+            Valid actions: click, doubleclick, rightclick, type, keycombo
+            For click/doubleclick/rightclick: VALUE is x,y pixel coordinates
+            For type: VALUE is the text to type
+            For keycombo: VALUE is the key combination like Ctrl+S
+
+            If the user is asking a question (not requesting an action), respond with only:
+            DESCRIPTION: your answer
+
+            Example — click a field then type into it:
+            DESCRIPTION: I'll click the User name field and type the username
+            1. ACTION: click  TARGET: User name field  VALUE: 400, 250
+            2. ACTION: type  TARGET: User name field  VALUE: MHE
+            """;
+
+        var result = await _claude.SendAsync(screenshot, planPrompt);
+        var parsed = ParseStructuredResponse(result.Text);
+
+        var executedActions = new List<object>();
+
+        foreach (var (action, target, value) in parsed.Actions)
+        {
+            if (await ExecuteActionAsync(action, value))
+            {
+                RecordAction(action, target);
+                executedActions.Add(new { type = action, target });
+                await Task.Delay(200);
+            }
+        }
+
+        await WriteJsonAsync(resp, new
+        {
+            response = parsed.Description ?? result.Text,
+            model = result.Model,
+            inputTokens = result.InputTokens,
+            outputTokens = result.OutputTokens,
+            actions = executedActions,
+        });
+    }
+
+    private record ParsedResponse(string? Description, List<(string Action, string Target, string Value)> Actions);
+
+    private static readonly Regex ActionLineRegex = new(
+        @"^\d+\.\s*ACTION:\s*(\S+)\s+TARGET:\s*(.*?)\s{2,}VALUE:\s*(.+)$",
+        RegexOptions.IgnoreCase);
+
+    private static ParsedResponse ParseStructuredResponse(string text)
+    {
+        string? description = null;
+        var actions = new List<(string, string, string)>();
+
+        foreach (var line in text.Split('\n'))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.StartsWith("DESCRIPTION:", StringComparison.OrdinalIgnoreCase))
+            {
+                description = trimmed["DESCRIPTION:".Length..].Trim();
+            }
+            else
+            {
+                var m = ActionLineRegex.Match(trimmed);
+                if (m.Success)
+                {
+                    actions.Add((
+                        m.Groups[1].Value.Trim().ToLowerInvariant(),
+                        m.Groups[2].Value.Trim(),
+                        m.Groups[3].Value.Trim()));
+                }
+            }
+        }
+
+        return new ParsedResponse(description, actions);
+    }
+
+    private async Task<bool> ExecuteActionAsync(string action, string value)
+    {
+        switch (action)
+        {
+            case "click":
+            case "doubleclick":
+            case "rightclick":
+                if (TryParseCoords(value, out var x, out var y))
+                {
+                    if (action == "click") await _rdp.ClickAsync(x, y);
+                    else if (action == "doubleclick") await _rdp.DoubleClickAsync(x, y);
+                    else await _rdp.RightClickAsync(x, y);
+                    return true;
+                }
+                _logger.LogWarning("Could not parse coordinates from '{Value}'", value);
+                return false;
+            case "type":
+                await _rdp.SendKeysAsync(value);
+                return true;
+            case "keycombo":
+                await _rdp.SendKeyComboAsync(value);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static bool TryParseCoords(string value, out int x, out int y)
+    {
+        x = y = 0;
+        var parts = value.Split(',', StringSplitOptions.TrimEntries);
+        return parts.Length == 2 && int.TryParse(parts[0], out x) && int.TryParse(parts[1], out y);
     }
 
     private void HandleHistory(HttpListenerResponse resp)

@@ -21,12 +21,10 @@ public sealed class RdpHostForm : Form
     private void InitializeComponent()
     {
         Text = "MasterBlaster RDP Host";
-        ShowInTaskbar = true;
-        FormBorderStyle = FormBorderStyle.Sizable;
+        FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         Location = new Point(0, 0);
         Size = new Size(1920, 1080);
-        WindowState = FormWindowState.Minimized;
 
         SuspendLayout();
 
@@ -46,34 +44,19 @@ public sealed class RdpHostForm : Form
         _rdpHost?.SetBounds(0, 0, width, height);
     }
 
-    /// <summary>
-    /// Capture the RDP control's content via CopyFromScreen.
-    /// The form must be visible and restored (not minimized) for this to work.
-    /// </summary>
     public byte[] CaptureScreenshot()
     {
         if (_rdpHost is null) throw new InvalidOperationException("RDP control not initialized.");
 
-        // Restore the form if minimized so the control renders on-screen
-        var wasMinimized = WindowState == FormWindowState.Minimized;
-        if (wasMinimized)
-            WindowState = FormWindowState.Normal;
-
-        // Let the control render
-        Application.DoEvents();
-
-        var screenPoint = _rdpHost.PointToScreen(Point.Empty);
+        var loc = PointToScreen(Point.Empty);
         var width = _rdpHost.Width;
         var height = _rdpHost.Height;
 
         using var bmp = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
         using (var g = Graphics.FromImage(bmp))
         {
-            g.CopyFromScreen(screenPoint, Point.Empty, new Size(width, height));
+            g.CopyFromScreen(loc.X, loc.Y, 0, 0, new Size(width, height));
         }
-
-        if (wasMinimized)
-            WindowState = FormWindowState.Minimized;
 
         using var ms = new MemoryStream();
         bmp.Save(ms, ImageFormat.Png);

@@ -251,7 +251,15 @@ async function doChat() {
       body: JSON.stringify({prompt})
     });
     const d = await r.json();
-    msgs.innerHTML += '<div class="chat-msg assistant">' + escHtml(d.response) + '</div>';
+    let responseHtml = escHtml(d.response);
+    if (d.actions && d.actions.length > 0) {
+      for (const a of d.actions) {
+        responseHtml += '<div style="color:#4ade80;font-size:12px;margin-top:4px">&#9654; ' + escHtml(a.type) + ' "' + escHtml(a.target) + '"</div>';
+        addHistory(a.type, a.target);
+      }
+      setTimeout(refreshScreenshot, 500);
+    }
+    msgs.innerHTML += '<div class="chat-msg assistant">' + responseHtml + '</div>';
   } catch(e) {
     msgs.innerHTML += '<div class="chat-msg assistant" style="color:#f87171">Error: ' + escHtml(e.message) + '</div>';
   }

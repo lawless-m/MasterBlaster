@@ -66,8 +66,6 @@ public sealed class MstscRdpController : IRdpController
 
             ConfigureRdpClient(config);
 
-            _formReadyTcs?.TrySetResult(true);
-
             System.Windows.Forms.Application.Run(_hostForm);
 
             _logger.LogDebug("STA thread message pump exited.");
@@ -107,9 +105,25 @@ public sealed class MstscRdpController : IRdpController
 
         ocx.Connect();
 
-        _isConnected = true;
-        _logger.LogInformation("RDP session connected.");
-        Connected?.Invoke(this, EventArgs.Empty);
+        // ocx.Connect() is async — poll until the session is actually connected
+        var timer = new System.Windows.Forms.Timer { Interval = 500 };
+        timer.Tick += (_, _) =>
+        {
+            try
+            {
+                if ((int)ocx.Connected == 1)
+                {
+                    timer.Stop();
+                    timer.Dispose();
+                    _isConnected = true;
+                    _logger.LogInformation("RDP session connected.");
+                    _formReadyTcs?.TrySetResult(true);
+                    Connected?.Invoke(this, EventArgs.Empty);
+                }
+            }
+            catch { /* still connecting */ }
+        };
+        timer.Start();
     }
 
     public async Task DisconnectAsync()
@@ -162,10 +176,9 @@ public sealed class MstscRdpController : IRdpController
 
         await InvokeOnStaThreadAsync(() =>
         {
-            var hwnd = _hostForm!.GetInputWindowHandle();
-            var lParam = NativeMethods.MakeLParam(x, y);
-            NativeMethods.SendMessage(hwnd, NativeMethods.WM_LBUTTONDOWN, (IntPtr)NativeMethods.MK_LBUTTON, lParam);
-            NativeMethods.SendMessage(hwnd, NativeMethods.WM_LBUTTONUP, IntPtr.Zero, lParam);
+            MoveToRdpPoint(x, y);
+            NativeMethods.mouse_event(NativeMethods.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, IntPtr.Zero);
+            NativeMethods.mouse_event(NativeMethods.MOUSEEVENTF_LEFTUP, 0, 0, 0, IntPtr.Zero);
         });
     }
 
@@ -176,12 +189,11 @@ public sealed class MstscRdpController : IRdpController
 
         await InvokeOnStaThreadAsync(() =>
         {
-            var hwnd = _hostForm!.GetInputWindowHandle();
-            var lParam = NativeMethods.MakeLParam(x, y);
-            NativeMethods.SendMessage(hwnd, NativeMethods.WM_LBUTTONDOWN, (IntPtr)NativeMethods.MK_LBUTTON, lParam);
-            NativeMethods.SendMessage(hwnd, NativeMethods.WM_LBUTTONUP, IntPtr.Zero, lParam);
-            NativeMethods.SendMessage(hwnd, NativeMethods.WM_LBUTTONDBLCLK, (IntPtr)NativeMethods.MK_LBUTTON, lParam);
-            NativeMethods.SendMessage(hwnd, NativeMethods.WM_LBUTTONUP, IntPtr.Zero, lParam);
+            MoveToRdpPoint(x, y);
+            NativeMethods.mouse_event(NativeMethods.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, IntPtr.Zero);
+            NativeMethods.mouse_event(NativeMethods.MOUSEEVENTF_LEFTUP, 0, 0, 0, IntPtr.Zero);
+            NativeMethods.mouse_event(NativeMethods.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, IntPtr.Zero);
+            NativeMethods.mouse_event(NativeMethods.MOUSEEVENTF_LEFTUP, 0, 0, 0, IntPtr.Zero);
         });
     }
 
@@ -192,10 +204,9 @@ public sealed class MstscRdpController : IRdpController
 
         await InvokeOnStaThreadAsync(() =>
         {
-            var hwnd = _hostForm!.GetInputWindowHandle();
-            var lParam = NativeMethods.MakeLParam(x, y);
-            NativeMethods.SendMessage(hwnd, NativeMethods.WM_RBUTTONDOWN, (IntPtr)NativeMethods.MK_RBUTTON, lParam);
-            NativeMethods.SendMessage(hwnd, NativeMethods.WM_RBUTTONUP, IntPtr.Zero, lParam);
+            MoveToRdpPoint(x, y);
+            NativeMethods.mouse_event(NativeMethods.MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, IntPtr.Zero);
+            NativeMethods.mouse_event(NativeMethods.MOUSEEVENTF_RIGHTUP, 0, 0, 0, IntPtr.Zero);
         });
     }
 
@@ -206,10 +217,11 @@ public sealed class MstscRdpController : IRdpController
 
         await InvokeOnStaThreadAsync(() =>
         {
-            var hwnd = _hostForm!.GetInputWindowHandle();
+            FocusRdpControl();
             foreach (var ch in text)
             {
-                NativeMethods.SendMessage(hwnd, NativeMethods.WM_CHAR, (IntPtr)ch, IntPtr.Zero);
+                NativeMethods.SendUnicodeChar(ch);
+                Thread.Sleep(20);
             }
         });
     }
@@ -221,23 +233,36 @@ public sealed class MstscRdpController : IRdpController
 
         await InvokeOnStaThreadAsync(() =>
         {
-            var hwnd = _hostForm!.GetInputWindowHandle();
+            FocusRdpControl();
             var parts = combo.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
 
-            var keys = new List<(int vk, bool extended)>();
+            var keys = new List<int>();
             foreach (var part in parts)
             {
-                keys.Add(NativeMethods.ParseKeyName(part));
+                var (vk, _) = NativeMethods.ParseKeyName(part);
+                keys.Add(vk);
             }
 
-            // Press all keys down
-            foreach (var (vk, ext) in keys)
-                NativeMethods.SendKeyDown(hwnd, vk, ext);
+            foreach (var vk in keys)
+                NativeMethods.SendVkDown(vk);
 
-            // Release in reverse order
             for (int i = keys.Count - 1; i >= 0; i--)
-                NativeMethods.SendKeyUp(hwnd, keys[i].vk, keys[i].extended);
+                NativeMethods.SendVkUp(keys[i]);
         });
+    }
+
+    private void MoveToRdpPoint(int x, int y)
+    {
+        var screenPoint = _hostForm!.RdpControl.PointToScreen(new System.Drawing.Point(x, y));
+        NativeMethods.SetForegroundWindow(_hostForm.Handle);
+        NativeMethods.SetCursorPos(screenPoint.X, screenPoint.Y);
+        Thread.Sleep(50); // let the cursor arrive
+    }
+
+    private void FocusRdpControl()
+    {
+        NativeMethods.SetForegroundWindow(_hostForm!.Handle);
+        _hostForm.RdpControl.Focus();
     }
 
     private Task InvokeOnStaThreadAsync(Action action)
