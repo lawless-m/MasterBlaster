@@ -40,8 +40,8 @@ public class RdpConfig
     [JsonPropertyName("username")]
     public string Username { get; set; } = "";
 
-    [JsonPropertyName("password_env")]
-    public string PasswordEnv { get; set; } = "MB_RDP_PASSWORD";
+    [JsonPropertyName("password")]
+    public string Password { get; set; } = "";
 
     [JsonPropertyName("domain")]
     public string Domain { get; set; } = "";
@@ -58,8 +58,8 @@ public class RdpConfig
 
 public class ClaudeConfig
 {
-    [JsonPropertyName("api_key_env")]
-    public string ApiKeyEnv { get; set; } = "ANTHROPIC_API_KEY";
+    [JsonPropertyName("api_key")]
+    public string ApiKey { get; set; } = "";
 
     [JsonPropertyName("model")]
     public string Model { get; set; } = "claude-sonnet-4-5-20250929";

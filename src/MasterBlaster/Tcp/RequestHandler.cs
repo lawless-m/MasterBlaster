@@ -243,7 +243,7 @@ public class RequestHandler
                 Server = _config.Rdp.Server,
                 Port = _config.Rdp.Port,
                 Username = _config.Rdp.Username,
-                Password = Environment.GetEnvironmentVariable(_config.Rdp.PasswordEnv) ?? "",
+                Password = _config.Rdp.Password,
                 Domain = _config.Rdp.Domain,
                 Width = _config.Rdp.Width,
                 Height = _config.Rdp.Height,

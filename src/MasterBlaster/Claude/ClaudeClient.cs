@@ -34,8 +34,7 @@ public class ClaudeClient : IClaudeClient
     public ClaudeClient(HttpClient http, ClaudeConfig config, int screenWidth, int screenHeight, ILogger<ClaudeClient> logger)
     {
         _http = http ?? throw new ArgumentNullException(nameof(http));
-        _apiKey = ConfigLoader.ResolveClaudeApiKey(config)
-            ?? throw new ArgumentException($"Environment variable '{config.ApiKeyEnv}' is not set", nameof(config));
+        _apiKey = ConfigLoader.ResolveClaudeApiKey(config);
         _model = config.Model;
         _maxTokens = config.MaxTokensPerRequest;
         _systemPrompt = PromptBuilder.BuildSystemPrompt(screenWidth, screenHeight);
