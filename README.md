@@ -87,6 +87,14 @@ dotnet run -- validate create_customer
 dotnet run -- list
 ```
 
+**Explore an RDP session interactively:**
+
+```bash
+dotnet run -- explore
+```
+
+Opens a web UI at `http://localhost:9501/` where you can see the RDP screenshot, click on it, type text, send key combos, ask Claude questions about what's on screen, and generate MBL task files from your recorded actions. Use `--port` to change the default port.
+
 **Start as a TCP service:**
 
 ```bash
@@ -117,6 +125,7 @@ src/
     Claude/                # Claude API client and prompt construction
     Execution/             # Task executor and action handlers
     Rdp/                   # RDP connection and screenshot capture
+    Explore/               # Interactive web UI for RDP exploration
     Tcp/                   # TCP service for external integration
     Config/                # Configuration loading
     Logging/               # Structured logging and screenshot archival
