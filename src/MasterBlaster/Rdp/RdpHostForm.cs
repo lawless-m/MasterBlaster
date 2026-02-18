@@ -1,36 +1,17 @@
 namespace MasterBlaster.Rdp;
 
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.Windows.Forms;
 
-/// <summary>
-/// A hidden Windows Forms form that hosts the MSTSCLib ActiveX control.
-///
-/// MSTSCLib (the Microsoft RDP ActiveX control) is a COM component that must be
-/// sited on a Windows Forms control within a Single-Threaded Apartment (STA) thread
-/// that runs a message pump. This form serves as that host container.
-///
-/// The form is configured to:
-///   - Start hidden (not visible, no taskbar entry)
-///   - Size itself to match the requested remote desktop dimensions
-///   - Host the AxMsRdpClient ActiveX control as a child
-///
-/// Usage:
-///   The <see cref="MstscRdpController"/> creates an instance of this form on a
-///   dedicated STA thread and calls Application.Run(form) to start the message pump.
-///   All RDP operations are marshalled to this thread via Control.Invoke.
-/// </summary>
 public sealed class RdpHostForm : Form
 {
-    // TODO: MSTSCLib integration
-    // When the MSTSCLib COM reference is added, uncomment and use:
-    //
-    // private AxMSTSCLib.AxMsRdpClient9NotSafeForScripting? _rdpClient;
-    //
-    // /// <summary>
-    // /// Gets the hosted MSTSCLib ActiveX RDP client control.
-    // /// </summary>
-    // public AxMSTSCLib.AxMsRdpClient9NotSafeForScripting RdpClient
-    //     => _rdpClient ?? throw new InvalidOperationException("RDP client has not been initialized.");
+    private RdpAxHost? _rdpHost;
+
+    /// <summary>
+    /// The hosted ActiveX RDP control.
+    /// </summary>
+    public RdpAxHost RdpControl => _rdpHost ?? throw new InvalidOperationException("RDP control not initialized.");
 
     public RdpHostForm()
     {
@@ -39,75 +20,94 @@ public sealed class RdpHostForm : Form
 
     private void InitializeComponent()
     {
-        // Form configuration: hidden, non-interactive.
         Text = "MasterBlaster RDP Host";
         ShowInTaskbar = false;
-        WindowState = FormWindowState.Minimized;
-        Visible = false;
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
-        Location = new System.Drawing.Point(-10000, -10000);
-        Size = new System.Drawing.Size(1920, 1080);
+        Location = new Point(-32000, -32000);
+        Size = new Size(1920, 1080);
 
-        // TODO: MSTSCLib integration
-        // Create and add the ActiveX control:
-        //
-        // SuspendLayout();
-        //
-        // _rdpClient = new AxMSTSCLib.AxMsRdpClient9NotSafeForScripting();
-        // ((System.ComponentModel.ISupportInitialize)_rdpClient).BeginInit();
-        //
-        // _rdpClient.Dock = DockStyle.Fill;
-        // _rdpClient.Enabled = true;
-        // _rdpClient.Name = "rdpClient";
-        //
-        // Controls.Add(_rdpClient);
-        //
-        // ((System.ComponentModel.ISupportInitialize)_rdpClient).EndInit();
-        //
-        // ResumeLayout(false);
+        SuspendLayout();
+
+        _rdpHost = new RdpAxHost();
+        ((System.ComponentModel.ISupportInitialize)_rdpHost).BeginInit();
+        _rdpHost.Dock = DockStyle.Fill;
+        _rdpHost.Name = "rdpClient";
+        Controls.Add(_rdpHost);
+        ((System.ComponentModel.ISupportInitialize)_rdpHost).EndInit();
+
+        ResumeLayout(false);
+    }
+
+    public void SetDesktopSize(int width, int height)
+    {
+        Size = new Size(width, height);
+        _rdpHost?.SetBounds(0, 0, width, height);
     }
 
     /// <summary>
-    /// Updates the form size to match the requested remote desktop dimensions.
-    /// Must be called before connecting the RDP client.
+    /// Capture the RDP control's content via PrintWindow.
     /// </summary>
-    /// <param name="width">Desktop width in pixels.</param>
-    /// <param name="height">Desktop height in pixels.</param>
-    public void SetDesktopSize(int width, int height)
+    public byte[] CaptureScreenshot()
     {
-        Size = new System.Drawing.Size(width, height);
+        if (_rdpHost is null) throw new InvalidOperationException("RDP control not initialized.");
 
-        // TODO: MSTSCLib integration
-        // _rdpClient?.Size = new System.Drawing.Size(width, height);
+        var width = _rdpHost.Width;
+        var height = _rdpHost.Height;
+
+        using var bmp = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            var hdc = g.GetHdc();
+            try
+            {
+                NativeMethods.PrintWindow(_rdpHost.Handle, hdc, NativeMethods.PW_RENDERFULLCONTENT);
+            }
+            finally
+            {
+                g.ReleaseHdc(hdc);
+            }
+        }
+
+        using var ms = new MemoryStream();
+        bmp.Save(ms, ImageFormat.Png);
+        return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Get the inner RDP input window handle for sending mouse/key messages.
+    /// </summary>
+    public IntPtr GetInputWindowHandle()
+    {
+        if (_rdpHost is null || !_rdpHost.IsHandleCreated)
+            throw new InvalidOperationException("RDP control handle not created.");
+        return NativeMethods.FindDeepestChild(_rdpHost.Handle);
     }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
-            // TODO: MSTSCLib integration
-            // if (_rdpClient is not null)
-            // {
-            //     if (_rdpClient.Connected != 0)
-            //     {
-            //         try { _rdpClient.Disconnect(); } catch { /* best-effort */ }
-            //     }
-            //     _rdpClient.Dispose();
-            //     _rdpClient = null;
-            // }
+            _rdpHost?.Dispose();
+            _rdpHost = null;
         }
-
         base.Dispose(disposing);
     }
+}
+
+/// <summary>
+/// Custom AxHost subclass that hosts the MsRdpClient ActiveX control
+/// without requiring aximp-generated interop assemblies.
+/// </summary>
+public class RdpAxHost : AxHost
+{
+    // MsRdpClient10NotSafeForScripting — RDP client v11, available on Windows 10+
+    private const string RdpClientClsid = "A0C63C30-F08D-4AB4-907C-34905D770C7D";
+
+    public RdpAxHost() : base(RdpClientClsid) { }
 
     /// <summary>
-    /// Suppresses the form from becoming visible during normal operation.
+    /// Returns the underlying COM object. Use dynamic to access RDP properties/methods.
     /// </summary>
-    protected override void SetVisibleCore(bool value)
-    {
-        // Prevent the form from ever showing. The ActiveX control works fine
-        // inside a hidden form; we just need the message pump.
-        base.SetVisibleCore(false);
-    }
+    public object? Ocx => GetOcx();
 }
