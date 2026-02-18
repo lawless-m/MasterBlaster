@@ -9,6 +9,7 @@ using MasterBlaster.Execution;
 using MasterBlaster.Logging;
 using MasterBlaster.Mbl;
 using MasterBlaster.Rdp;
+using MasterBlaster.Explore;
 using MasterBlaster.Tcp;
 using Microsoft.Extensions.Logging;
 
@@ -71,10 +72,23 @@ public class Program
             context.ExitCode = await RunServiceAsync(configPath, context.GetCancellationToken());
         });
 
+        // masterblaster explore
+        var exploreCommand = new Command("explore", "Start an interactive web UI for exploring an RDP session");
+        var portOption = new Option<int>("--port", getDefaultValue: () => 9501, description: "HTTP port for the explore UI");
+        exploreCommand.AddOption(portOption);
+
+        exploreCommand.SetHandler(async (InvocationContext context) =>
+        {
+            var configPath = context.ParseResult.GetValueForOption(configOption)!;
+            var port = context.ParseResult.GetValueForOption(portOption);
+            context.ExitCode = await RunExploreAsync(configPath, port, context.GetCancellationToken());
+        });
+
         rootCommand.AddCommand(runCommand);
         rootCommand.AddCommand(validateCommand);
         rootCommand.AddCommand(listCommand);
         rootCommand.AddCommand(serviceCommand);
+        rootCommand.AddCommand(exploreCommand);
 
         return await rootCommand.InvokeAsync(args);
     }
@@ -335,6 +349,54 @@ public class Program
         catch (Exception ex)
         {
             Console.Error.WriteLine($"Service error: {ex.Message}");
+            return 2;
+        }
+    }
+
+    private static async Task<int> RunExploreAsync(string configPath, int port, CancellationToken ct)
+    {
+        try
+        {
+            var config = ConfigLoader.Load(configPath);
+            using var loggerFactory = CreateLoggerFactory(config);
+            var logger = loggerFactory.CreateLogger<Program>();
+
+            var rdp = new MstscRdpController(loggerFactory.CreateLogger<MstscRdpController>());
+            var rdpConfig = new RdpConnectionConfig
+            {
+                Server = config.Rdp.Server,
+                Port = config.Rdp.Port,
+                Username = config.Rdp.Username,
+                Password = Environment.GetEnvironmentVariable(config.Rdp.PasswordEnv) ?? "",
+                Domain = config.Rdp.Domain,
+                Width = config.Rdp.Width,
+                Height = config.Rdp.Height,
+                ColorDepth = config.Rdp.ColorDepth
+            };
+
+            await rdp.ConnectAsync(rdpConfig, ct);
+            logger.LogInformation("RDP connected to {Server}", config.Rdp.Server);
+
+            var claude = new ClaudeClient(config.Claude, config.Rdp.Width, config.Rdp.Height,
+                loggerFactory.CreateLogger<ClaudeClient>());
+
+            await using var server = new ExploreServer(rdp, claude, config.Rdp.Width, config.Rdp.Height, port,
+                loggerFactory.CreateLogger<ExploreServer>());
+
+            logger.LogInformation("Open http://localhost:{Port}/ in your browser", port);
+            await server.RunAsync(ct);
+
+            await rdp.DisconnectAsync();
+            await rdp.DisposeAsync();
+            return 0;
+        }
+        catch (OperationCanceledException)
+        {
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Explore error: {ex.Message}");
             return 2;
         }
     }
